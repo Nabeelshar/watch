@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {io as client} from 'socket.io-client';
+import {attachRealtime} from '../server/realtime.js';
+import {parseMedia,expectedTime} from '../server/media.js';
+const ask=(s,event,p={})=>new Promise((resolve,reject)=>s.timeout(2500).emit(event,p,(e,d)=>e?reject(e):resolve(d)));
+const once=(s,e)=>new Promise(r=>s.once(e,r));
+test('URL normalization and playback clock',()=>{
+ assert.equal(parseMedia('https://youtu.be/aqz-KE-bpKQ').provider,'YouTube');
+ assert.equal(parseMedia('https://vimeo.com/12345/abcdef').url,'https://player.vimeo.com/video/12345?h=abcdef');
+ assert.equal(parseMedia('https://cdn.example.com/master.m3u8?token=abc').provider,'HLS');
+ for(const url of ['javascript:alert(1)','https://youtube.com/watch?v=no','file:///movie.mp4','https://user:password@example.com/a.mp4'])assert.throws(()=>parseMedia(url));
+ assert.equal(parseMedia('https://youtube.com.evil.org/watch?v=aqz-KE-bpKQ').provider,'Auto');
+ assert.equal(parseMedia('https://cdn.example.com/video.ts?signature=untouched').provider,'TS');
+ assert.equal(parseMedia('https://cdn.example.com/watch?signature=x','HLS').provider,'HLS');
+ assert.throws(()=>parseMedia('https://cdn.example.com/a.ts','Invalid'));
+ assert.equal(expectedTime({lastTimestamp:10,lastTimestampUpdated:1000,playbackState:'playing',playbackRate:1.5},3000),13);
+ assert.equal(expectedTime({lastTimestamp:10,lastTimestampUpdated:1000,playbackState:'paused',playbackRate:2},3000),10);
+});
+test('two users: create, join, friendship, sync, chat, voice isolation, reconnect',async t=>{
+ const server=createServer();const runtime=attachRealtime(server,{secret:'test-secret'});await new Promise(r=>server.listen(0,'127.0.0.1',r));const url=`http://127.0.0.1:${server.address().port}`;const clients=[];
+ t.after(()=>{clients.forEach(s=>s.disconnect());runtime.close();server.close();});
+ async function connect(name,token){const s=client(url,{transports:['websocket'],forceNew:true});clients.push(s);await once(s,'connect');const d=await ask(s,'identity:hello',{name,avatar:'🌙',token});assert.equal(d.ok,true);return{s,d};}
+ const {s:a,d:alice}=await connect('Alice');const {s:b,d:bob}=await connect('Bob');assert.notEqual(alice.profile.id,bob.profile.id);
+ const created=await ask(a,'room:create',{url:'https://example.com/video.mp4'});assert.ok(created.state.roomId);const addedA=once(a,'friends:add'),addedB=once(b,'friends:add');const joined=await ask(b,'room:join',{roomId:created.state.roomId});assert.equal(joined.members.length,2);assert.equal((await addedA).id,bob.profile.id);assert.equal((await addedB).id,alice.profile.id);
+ let update=once(b,'room:state');await ask(a,'player:update',{action:'play',time:12,videoUrl:created.state.video.url});assert.equal((await update).playbackState,'playing');
+ update=once(a,'room:state');await ask(b,'player:update',{action:'seek',time:95,videoUrl:created.state.video.url});assert.ok((await update).lastTimestamp>=95);
+ await ask(a,'player:update',{action:'rate',time:95,rate:1.5,videoUrl:created.state.video.url});const paused=await ask(a,'player:update',{action:'pause',time:96,videoUrl:created.state.video.url});assert.equal(paused.state.playbackState,'paused');assert.equal(paused.state.playbackRate,1.5);
+ const invalid=await ask(a,'player:update',{action:'seek',time:-1,videoUrl:created.state.video.url});assert.equal(invalid.ok,false);
+ const msg=once(b,'chat:message');await ask(a,'chat:send',{text:'Ready for movie night!'});assert.equal((await msg).text,'Ready for movie night!');
+ const reaction=once(b,'reaction');await ask(a,'reaction:send',{emoji:'🔥'});assert.equal((await reaction).emoji,'🔥');
+ await ask(a,'voice:state',{enabled:true});await ask(b,'voice:state',{enabled:true});const signal=once(b,'voice:signal');await ask(a,'voice:signal',{to:b.id,type:'offer',payload:{type:'offer',sdp:'test'}});assert.equal((await signal).from,a.id);
+ const {s:c}=await connect('Outsider');const blocked=await ask(c,'voice:signal',{to:b.id,type:'offer',payload:{}});assert.equal(blocked.ok,false);
+ const forged=await connect('Imposter',`${alice.profile.id}.${'0'.repeat(64)}`);assert.notEqual(forged.d.profile.id,alice.profile.id);
+ b.disconnect();const reconnected=await connect('Bob',bob.token);assert.equal(reconnected.d.profile.id,bob.profile.id);const late=await ask(reconnected.s,'room:join',{roomId:created.state.roomId});assert.equal(late.state.lastTimestamp,96);assert.equal(late.state.playbackState,'paused');assert.ok(late.messages.some(m=>m.text==='Ready for movie night!'));
+ const missing=await ask(c,'room:join',{roomId:'missing'});assert.equal(missing.ok,false);
+ const changed=await ask(a,'room:video',{url:'https://vimeo.com/12345'});assert.equal(changed.ok,true);const stale=await ask(a,'player:update',{action:'play',time:500,videoUrl:created.state.video.url});assert.equal(stale.state.lastTimestamp,0);assert.equal(stale.state.video.provider,'Vimeo');
+ const formatUpdate=once(reconnected.s,'room:state');
+ await ask(a,'room:video',{url:'https://cdn.example.com/opaque?signature=abc',format:'TS'});
+ const typed=await formatUpdate;assert.equal(typed.video.provider,'TS');assert.equal(typed.video.url,'https://cdn.example.com/opaque?signature=abc');
+});

@@ -1,0 +1,3 @@
+# Native interface
+
+Mode: Operate. Preserve the established web app and reference screenshots: nearly black player, charcoal surfaces (#16161b, #24242b), light text, muted secondary text, lavender (#b99aee) primary actions. Use native Material components, generous touch targets, readable system type, and safe areas. Phone navigation contains Watch and Chat only; participants appear in a sheet and in the call strip. Keep video above both tabs. Wide layouts place chat beside video. Settings and source entry use focused sheets. Loading, offline, permission-denied, and empty states explain a next action.

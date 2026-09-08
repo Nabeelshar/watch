@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
-import { parseMedia, expectedTime } from './media.js';
+import { resolveMedia, expectedTime } from './media.js';
 const MAX_MEMBERS=8, TTL=30*60*1000;
 export function attachRealtime(httpServer,options={}){
  const secret=options.secret||process.env.IDENTITY_SECRET||randomBytes(32).toString('hex');
@@ -33,7 +33,7 @@ export function attachRealtime(httpServer,options={}){
  io.on('connection',s=>{
   let budget=120,refill=Date.now();
   s.use(([event],next)=>{const now=Date.now();budget=Math.min(120,budget+(now-refill)*0.04);refill=now;if(budget<1)return next(new Error('Too many events. Please slow down.'));budget--;next();});
-  const handle=(event,fn)=>s.on(event,(payload,ack)=>{try{if(event!=='identity:hello'&&!s.data.profile)throw new Error('Connect your guest profile first.');const result=fn(payload||{});if(typeof ack==='function')ack({ok:true,...result});}catch(e){if(typeof ack==='function')ack({ok:false,error:e.message});else s.emit('app:error',e.message);}});
+  const handle=(event,fn)=>s.on(event,async(payload,ack)=>{try{if(event!=='identity:hello'&&!s.data.profile)throw new Error('Connect your guest profile first.');const result=await fn(payload||{});if(typeof ack==='function')ack({ok:true,...result});}catch(e){if(typeof ack==='function')ack({ok:false,error:e.message});else s.emit('app:error',e.message);}});
   handle('identity:hello',p=>{
    if(s.data.profile)throw new Error('Guest profile is already connected.');
    const id=validToken(p.token)||randomBytes(12).toString('hex');
@@ -43,10 +43,10 @@ export function attachRealtime(httpServer,options={}){
   });
   handle('identity:update',p=>{s.data.profile.name=String(p.name||'Guest').trim().slice(0,24)||'Guest';if(['🌙','🪐','🍿','🦊','🐸','👾','🐻','🌻'].includes(p.avatar))s.data.profile.avatar=p.avatar;profiles.set(s.data.profile.id,s.data.profile);for(const peer of io.sockets.sockets.values())if(peer.data.profile?.id===s.data.profile.id)peer.data.profile=s.data.profile;const r=roomFor(s);if(r)io.to(r.roomId).emit('room:members',members(r));broadcastPresence();return{profile:s.data.profile};});
   handle('clock:ping',()=>({now:Date.now()}));
-  handle('room:create',p=>{if(rooms.size>=5000)throw new Error('The server is busy. Try again shortly.');const video=parseMedia(p.url,p.format);let roomId;do{roomId=randomBytes(5).toString('base64url');}while(rooms.has(roomId));const r={roomId,currentVideoUrl:video.url,video:{...video,title:String(p.title||`${video.provider} watch party`).slice(0,120)},playbackState:'paused',lastTimestamp:0,lastTimestampUpdated:Date.now(),playbackRate:1,socketIds:new Set(),revision:0,messages:[],emptySince:null};rooms.set(roomId,r);join(s,r);return{state:state(r),members:members(r),messages:r.messages};});
+  handle('room:create',async p=>{if(rooms.size>=5000)throw new Error('The server is busy. Try again shortly.');const resolved=await resolveMedia(p.url,p.format);let roomId;do{roomId=randomBytes(5).toString('base64url');}while(rooms.has(roomId));const video={...resolved,title:String(p.title||resolved.title||`${resolved.provider} watch party`).slice(0,120)};const r={roomId,currentVideoUrl:video.url,video,playbackState:'paused',lastTimestamp:0,lastTimestampUpdated:Date.now(),playbackRate:1,socketIds:new Set(),revision:0,messages:[],emptySince:null};rooms.set(roomId,r);join(s,r);return{state:state(r),members:members(r),messages:r.messages};});
   handle('room:join',p=>{const r=rooms.get(p.roomId);if(!r)throw new Error('This room has expired or does not exist. Pick a video to start a new one.');join(s,r);return{state:state(r),members:members(r),messages:r.messages};});
   handle('room:leave',()=>{leave(s);return{};});
-  handle('room:video',p=>{const r=roomFor(s);if(!r)throw new Error('Join a room first.');const video=parseMedia(p.url,p.format);Object.assign(r,{video:{...video,title:String(p.title||`${video.provider} watch party`).slice(0,120)},currentVideoUrl:video.url,lastTimestamp:0,lastTimestampUpdated:Date.now(),playbackState:'paused',playbackRate:1,revision:r.revision+1});io.to(r.roomId).emit('room:state',state(r));notice(r,`${s.data.profile.name} picked a new video`);broadcastPresence();return{};});
+  handle('room:video',async p=>{const r=roomFor(s);if(!r)throw new Error('Join a room first.');const resolved=await resolveMedia(p.url,p.format);const video={...resolved,title:String(p.title||resolved.title||`${resolved.provider} watch party`).slice(0,120)};Object.assign(r,{video,currentVideoUrl:video.url,lastTimestamp:0,lastTimestampUpdated:Date.now(),playbackState:'paused',playbackRate:1,revision:r.revision+1});io.to(r.roomId).emit('room:state',state(r));notice(r,`${s.data.profile.name} picked a new video`);broadcastPresence();return{};});
   handle('player:update',p=>{
    const r=roomFor(s);if(!r)throw new Error('Join a room first.');if(!['play','pause','seek','rate'].includes(p.action))throw new Error('Invalid playback action.');
    if(!Number.isFinite(p.time)||p.time<0||p.time>604800)throw new Error('Invalid playback time.');

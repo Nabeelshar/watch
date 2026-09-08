@@ -2,7 +2,7 @@
 
 ## Mobile and playback update — September 2026
 
-The phone layout is now an iOS-inspired app shell with separate Watch, Explore, Chat, and People screens, a fixed bottom tab bar, safe-area spacing, bottom-sheet dialogs, an unread chat badge, native sharing, and larger touch controls. The same player stays mounted between tabs. A compact playing-now bar returns to the player from Explore and People. Chat keeps a small video above the conversation and makes room for the phone keyboard.
+The phone layout has two tabs: **Watch** and **Chat**. The same player stays mounted above either screen. Watch contains recent people, watch history and video sources; avatars open people/settings. Fullscreen requests landscape orientation when supported and uses a rotated layout fallback on portrait phones. Custom controls hide automatically; tap the video to reveal them.
 
 The app includes a web app manifest, Apple touch icon, standalone Home Screen mode, and a service worker that caches only the interface. Open the profile menu and choose **Add to Home Screen**. Watching and chatting still require an internet connection. This is an installable web app, not an App Store binary.
 
@@ -24,6 +24,18 @@ Player controls also include ten-second skipping, an iPhone fullscreen fallback 
 Validation for this update: production compilation and five automated suites covering format detection, signed URLs, TS byte recognition using the included fixture, native fallback, room synchronization, chat and presence. Physical iPhone/Android testing and new end-to-end TS/DASH playback checks have not been completed; earlier preview browser access was blocked by its URL policy. The two-tab results below describe the original MP4 implementation, not new device-level validation.
 
 A complete Vue 3 Composition API + Vite + Tailwind CSS frontend and Express + Socket.io server. No account setup, room-code entry, screen sharing, or video rebroadcasting. Pick a video; the app creates `/watch/:roomId`. People opening the link join automatically.
+
+## YouTube, web players and file compatibility
+
+YouTube loading now clears failed requests before retrying, polls for API readiness if another widget replaces its callback, and reports provider error codes (including missing referrer error 153). The server sends a strict-origin-when-cross-origin referrer policy. A blocked YouTube domain, disabled embedding, or WebView policy still needs a browser/network change; retry cannot bypass those restrictions.
+
+Paste an HTTPS web-player URL with **Web page / iframe** selected, or paste a complete quoted iframe embed code into the picker. Only the source URL is kept; submitted HTML and event handlers are never rendered. YouTube and Vimeo embeds still use their dedicated synchronized APIs. Other pages use a sandboxed iframe with an Open source link. The page must allow embedding; CSP frame-ancestors and X-Frame-Options are respected. No desktop browser or native WebView is installed by this feature.
+
+Direct video/audio links include 3GP, AAC, AIF/AIFF, ASF, AVI, M4A, M4V, MKV, MOV, MP3, MP4, MPA/MPE/MPEG/MPG, OGG/OGV, QT, RA/RM/RMVB, WAV, WMA/WMV, WebM, FLAC and Opus. Recognition is not codec conversion: legacy containers and codecs commonly require conversion to MP4 with H.264/AAC or MP3 before browsers can decode them. HLS, DASH, TS and FLV retain their existing adapters. There is no transcoding service bundled here.
+
+7Z, ACE, ARJ, BZ2, GZ/GZIP, LZH, R00–R99, RAR, SEA, SIT/SITX, TAR, Z and ZIP are archives; extract the media first. APK, EXE, MSI/MSU, BIN, IMG/ISO, PDF, PLJ, PPS/PPT, and TIF/TIFF are not playable video/audio. They produce an actionable error instead of an endless loading player.
+
+Synchronization sends explicit play/pause state and timestamps through Socket.io. Player-originated YouTube, Vimeo and native play/pause events also update the room; remote commands are suppressed to avoid echo loops. Google Drive and arbitrary cross-origin embeds remain manual: the browser cannot access their internal controls or synthesize trusted user taps. A provider playback API or a separately developed browser extension/native integration would be required for those sources.
 
 ## Run locally
 
@@ -128,6 +140,8 @@ The standalone production Express server also passed health, deep-link fallback,
 An additional HLS browser check was blocked by the browser URL policy. The HLS adapter is implemented and a local HLS fixture is included, but HLS playback was not browser-verified. The browser tooling provided two tabs, but did not expose arranging them side by side. External sample-video fetching was unavailable in the test network. YouTube/Vimeo playback therefore needs a final check on your deployment, as does real microphone/voice connectivity. Treat this as a deployable implementation with the stated validation limits, not an independently audited production service.
 
 ## Source map
+
+The Flutter Android/iOS app is in [mobile](mobile/README.md), backed by the watchparty Supabase project. It includes native playback, room chat, audio/video calling, and AdMob integration. See its README for the Android APK, configuration, and validation limits.
 
 | File | Responsibility |
 | --- | --- |

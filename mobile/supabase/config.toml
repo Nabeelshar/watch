@@ -1,0 +1,4 @@
+project_id = "watchparty"
+
+[functions.call-ice]
+verify_jwt = true

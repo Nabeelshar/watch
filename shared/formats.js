@@ -1,4 +1,26 @@
-export const formats = ['Auto', 'Video', 'HLS', 'TS', 'DASH', 'FLV'];
+export const formats = ['Auto', 'Video', 'HLS', 'TS', 'DASH', 'FLV', 'Embed'];
+
+const nativeExtensions = new Set('3gp 3g2 aac aif aiff asf avi m4a m4v mkv mov mp3 mp4 mpa mpe mpeg mpg ogg ogv qt ra rm rmvb wav wma wmv webm flac opus'.split(' '));
+const archiveExtensions = /^(7z|ace|arj|bz2|gz|gzip|lzh|r\d\d|rar|sea|sit|sitx|tar|z|zip)$/;
+const otherExtensions = /^(apk|bin|exe|img|iso|msi|msu|pdf|plj|pps|ppt|pptx|tif|tiff)$/;
+export function fileKind(url) {
+  const u = new URL(url);
+  for (const part of [u.searchParams.get('filename'),u.searchParams.get('file'),u.pathname]) {
+    if (!part) continue;
+    const ext = part.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1];
+    if (archiveExtensions.test(ext || '')) return 'archive';
+    if (otherExtensions.test(ext || '')) return 'non-media';
+    if (nativeExtensions.has(ext)) return 'media';
+  }
+  return 'unknown';
+}
+
+export function unsupportedFileMessage(url) {
+  const kind = fileKind(url);
+  if (kind === 'archive') return 'This is an archive, not a video. Extract it on your device, then share a link to the video inside.';
+  if (kind === 'non-media') return 'This file is a document, image, disk image, or installer—not playable audio or video. Choose a media file.';
+  return '';
+}
 
 export function formatFromType(type = '') {
   type = type.toLowerCase().split(';')[0].trim();
@@ -23,7 +45,7 @@ export function formatFromUrl(url) {
     if (/(?:^|\.)mpd$/.test(value) || value === 'dash') return 'DASH';
     if (/(?:^|\.)(ts|m2ts|mts)$/.test(value) || value === 'mpegts') return 'TS';
     if (/(?:^|\.)flv$/.test(value)) return 'FLV';
-    if (/(?:^|\.)(mp4|m4v|mov|webm|ogv|ogg|mp3|m4a|aac|wav)$/.test(value)) return 'Video';
+    if (nativeExtensions.has(value.split('.').pop())) return 'Video';
   }
   return 'Auto';
 }
